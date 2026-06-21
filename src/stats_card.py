@@ -96,7 +96,7 @@ def generate_card(metrics: dict, prev: dict | None, week_label: str) -> Path:
         ("7D Txns",         _fmt(metrics.get("weekly_txns"), ""),     metrics.get("weekly_txns"),      p.get("weekly_txns")),
         ("Active Addrs",    _fmt(metrics.get("active_addresses"), ""),metrics.get("active_addresses"), p.get("active_addresses")),
         ("Chain Fees (7D)", _fmt(metrics.get("chain_fees_7d")),       metrics.get("chain_fees_7d"),    p.get("chain_fees_7d")),
-        ("NFT Vol Talis",   _fmt(metrics.get("nft_volume_talis")),    metrics.get("nft_volume_talis"), p.get("nft_volume_talis")),
+        ("NFT Vol (7D)",    _fmt(metrics.get("nft_volume")),          metrics.get("nft_volume"),       p.get("nft_volume")),
     ]
 
     col_w = (WIDTH - 2 * PAD) // len(top_stats)
@@ -110,45 +110,46 @@ def generate_card(metrics: dict, prev: dict | None, week_label: str) -> Path:
     # Divider
     draw.rectangle([(PAD, 342), (WIDTH - PAD, 344)], fill=(45, 45, 85))
 
-    # ── Dapp leaderboard ─────────────────────────────────────────────────────
-    draw.text((PAD, 354), "Top Dapps — 7D Volume", font=_font(20), fill=MUTED)
+    # ── Dapp leaderboard (ranked by TVL) ──────────────────────────────────────
+    draw.text((PAD, 354), "Top Dapps by TVL", font=_font(20), fill=MUTED)
 
-    dapp_vols  = metrics.get("dapp_volumes") or {}
-    prev_vols  = p.get("dapp_volumes") or {}
-    dapp_fees  = metrics.get("dapp_fees") or {}
+    dapp_stats = metrics.get("dapp_stats") or {}
+    prev_dapps = p.get("dapp_stats") or {}
 
-    # Merge: use volume if available, else fees as proxy
-    display_vols = {}
-    for name in DAPP_ORDER:
-        vol = dapp_vols.get(name, 0)
-        if not vol:
-            vol = dapp_fees.get(name, 0)
-        display_vols[name] = vol
-
-    sorted_dapps = sorted(display_vols.items(), key=lambda x: x[1], reverse=True)
-    bar_max      = sorted_dapps[0][1] if sorted_dapps and sorted_dapps[0][1] > 0 else 1
-    bar_area_w   = WIDTH - 2 * PAD - 320
-    row_h        = 50
-    y0           = 384
+    ranked = sorted(
+        DAPP_ORDER,
+        key=lambda n: (dapp_stats.get(n) or {}).get("tvl", 0),
+        reverse=True,
+    )
+    bar_max    = max(((dapp_stats.get(n) or {}).get("tvl", 0) for n in ranked), default=1) or 1
+    bar_area_w = WIDTH - 2 * PAD - 320
+    row_h      = 50
+    y0         = 384
 
     medals = ["①", "②", "③", "④", "⑤", "⑥", "⑦"]
-    for i, (name, vol) in enumerate(sorted_dapps):
+    for i, name in enumerate(ranked):
+        s        = dapp_stats.get(name) or {}
+        tvl_v    = s.get("tvl", 0)
+        vol_v    = s.get("volume_7d", 0)
         y        = y0 + i * row_h
         rank_col = GOLD if i == 0 else WHITE
         draw.text((PAD, y + 6), medals[i], font=_font(18), fill=rank_col)
         draw.text((PAD + 28, y + 6), name, font=_font(19), fill=WHITE)
 
         bar_x   = PAD + 210
-        bar_len  = max(4, int((vol / bar_max) * bar_area_w)) if vol > 0 else 0
+        bar_len = max(4, int((tvl_v / bar_max) * bar_area_w)) if tvl_v > 0 else 0
         if bar_len:
             bar_col = ACCENT if i == 0 else (70, 55, 160)
             draw.rectangle([(bar_x, y + 10), (bar_x + bar_len, y + 30)], fill=bar_col)
 
-        vol_label = _fmt(vol) if vol else "–"
-        draw.text((bar_x + bar_len + 10, y + 6), vol_label, font=_font(19), fill=WHITE)
+        # TVL label, plus volume in muted text when present
+        label = _fmt(tvl_v) if tvl_v else "–"
+        draw.text((bar_x + bar_len + 10, y + 6), label, font=_font(19), fill=WHITE)
+        if vol_v:
+            draw.text((bar_x + bar_len + 10, y + 28), f"vol {_fmt(vol_v)}", font=_font(13), fill=MUTED)
 
-        prev_v   = prev_vols.get(name)
-        pl, plc  = _pct(vol if vol else None, prev_v if prev_v else None)
+        prev_v  = (prev_dapps.get(name) or {}).get("tvl")
+        pl, plc = _pct(tvl_v if tvl_v else None, prev_v if prev_v else None)
         if pl:
             draw.text((WIDTH - PAD - 90, y + 6), pl, font=_font(17), fill=plc)
 

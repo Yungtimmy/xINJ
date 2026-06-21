@@ -53,10 +53,9 @@ def build_thread(metrics: dict, prev: dict | None, week_label: str) -> list[str]
     txns       = metrics.get("weekly_txns")
     addrs      = metrics.get("active_addresses")
     fees       = metrics.get("chain_fees_7d")
-    nft_vol    = metrics.get("nft_volume_talis")
-    dapp_vols  = metrics.get("dapp_volumes") or {}
-    dapp_fees  = metrics.get("dapp_fees") or {}
-    prev_vols  = p.get("dapp_volumes") or {}
+    nft_vol    = metrics.get("nft_volume")
+    dapp_stats = metrics.get("dapp_stats") or {}
+    prev_dapps = p.get("dapp_stats") or {}
 
     # ── Tweet 1: Headline numbers ─────────────────────────────────────────────
     tweet1 = (
@@ -65,7 +64,7 @@ def build_thread(metrics: dict, prev: dict | None, week_label: str) -> list[str]
         f"{_arrow(price, p.get('inj_price'))}\n"
         f"TVL: {_fmt(tvl)}{_arrow(tvl, p.get('tvl_usd'))}\n"
         f"Chain Fees (7D): {_fmt(fees)}{_arrow(fees, p.get('chain_fees_7d'))}\n"
-        f"NFT Vol (Talis): {_fmt(nft_vol)}{_arrow(nft_vol, p.get('nft_volume_talis'))}\n\n"
+        f"NFT Vol (7D): {_fmt(nft_vol)}{_arrow(nft_vol, p.get('nft_volume'))}\n\n"
         f"Full breakdown 👇 #Injective #INJ #DeFi"
     )
 
@@ -76,22 +75,26 @@ def build_thread(metrics: dict, prev: dict | None, week_label: str) -> list[str]
         f"👛 Active Addresses: {_fmt(addrs, '')}{_arrow(addrs, p.get('active_addresses'))}"
     )
 
-    # ── Tweet 3: Dapp leaderboard ─────────────────────────────────────────────
+    # ── Tweet 3: Dapp leaderboard (ranked by TVL) ─────────────────────────────
     medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣"]
-    lines  = []
-    display = {}
-    for name in DAPP_ORDER:
-        vol = dapp_vols.get(name, 0) or dapp_fees.get(name, 0)
-        display[name] = vol
+    ranked = sorted(
+        DAPP_ORDER,
+        key=lambda n: (dapp_stats.get(n) or {}).get("tvl", 0),
+        reverse=True,
+    )
+    lines = []
+    for i, name in enumerate(ranked[:7]):
+        s        = dapp_stats.get(name) or {}
+        tvl_v    = s.get("tvl", 0)
+        prev_tvl = (prev_dapps.get(name) or {}).get("tvl")
+        # Show volume in parentheses when the dapp actually has DEX volume
+        vol_v    = s.get("volume_7d", 0)
+        extra    = f" · vol {_fmt(vol_v)}" if vol_v else ""
+        chg      = _arrow(tvl_v if tvl_v else None, prev_tvl)
+        label    = _fmt(tvl_v) if tvl_v else "–"
+        lines.append(f"{medals[i]} {name}: {label} TVL{extra}{chg}")
 
-    for i, (name, vol) in enumerate(sorted(display.items(), key=lambda x: x[1], reverse=True)):
-        if i >= 7:
-            break
-        chg   = _arrow(vol if vol else None, prev_vols.get(name))
-        label = _fmt(vol) if vol else "–"
-        lines.append(f"{medals[i]} {name}: {label}{chg}")
-
-    tweet3 = "🏆 Top Dapps — 7D Volume\n\n" + "\n".join(lines)
+    tweet3 = "🏆 Top Dapps by TVL (7D Δ)\n\n" + "\n".join(lines)
 
     return [tweet1, tweet2, tweet3]
 

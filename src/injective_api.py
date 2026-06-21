@@ -12,8 +12,10 @@ TALIS_BASE    = "https://api.talis.art"
 
 DAPP_NAMES = ["Helix", "Mito", "Hydro", "DojoSwap", "Black Panther", "Neptune", "Choice"]
 
-# DefiLlama slug -> display name mapping (dexs + fees + lending)
-DEFILLAMA_SLUG_MAP = {
+# Match DefiLlama protocol names (lowercased) -> our display name.
+# DefiLlama tracks these under different categories (DEX, Liquid Staking,
+# Yield, Lending) so TVL is the one metric available for ALL of them.
+DEFILLAMA_NAME_MATCH = {
     "helix":         "Helix",
     "dojoswap":      "DojoSwap",
     "mito":          "Mito",
@@ -22,7 +24,6 @@ DEFILLAMA_SLUG_MAP = {
     "black panther": "Black Panther",
     "blackpanther":  "Black Panther",
     "choice":        "Choice",
-    "injective":     "Helix",   # sometimes listed under chain name
 }
 
 
@@ -130,137 +131,143 @@ def _sum_daily(data: dict | list, keys: tuple) -> int | None:
     return None
 
 
-# ── Protocol fees ──────────────────────────────────────────────────────────────
+# ── Per-dapp stats: TVL (all dapps) + fees + volume where available ─────────────
 
-def fetch_injective_fees(days: int = 7) -> dict:
+def fetch_dapp_stats() -> dict[str, dict]:
     """
-    Fetch Injective chain-level fees and per-dapp fees from DefiLlama.
-    Returns {"chain_fees_7d": float, "dapp_fees": {name: float}}
+    Build per-dapp stats from DefiLlama's /protocols endpoint (TVL is the one
+    metric tracked for ALL of them) and enrich with DEX volume + fees where
+    DefiLlama has an adapter.
+
+    Returns {display_name: {"tvl": float, "volume_7d": float, "fees_7d": float}}
     """
-    result = {"chain_fees_7d": None, "dapp_fees": {}}
+    stats: dict[str, dict] = {
+        n: {"tvl": 0.0, "volume_7d": 0.0, "fees_7d": 0.0} for n in DAPP_NAMES
+    }
 
-    # Chain-level fees
+    # 1. TVL for every Injective protocol — works for Hydro, Mito, DojoSwap, etc.
     try:
-        data = _get("https://api.llama.fi/summary/fees/injective")
-        total7d = (
-            data.get("total7d")
-            or data.get("totalFees7d")
-            or _sum_chart(data.get("totalDataChart"), days)
-        )
-        result["chain_fees_7d"] = float(total7d) if total7d else None
-    except Exception:
-        pass
-
-    # Per-dapp fees from overview
-    try:
-        data = _get(
-            "https://api.llama.fi/overview/fees/injective"
-            "?excludeTotalDataChart=true&dataType=dailyFees"
-        )
-        for p in data.get("protocols", []):
-            slug  = (p.get("name") or p.get("slug") or "").lower()
-            vol7d = float(p.get("total7d") or p.get("totalFees7d") or 0)
-            for key, display in DEFILLAMA_SLUG_MAP.items():
-                if key in slug and vol7d > 0:
-                    result["dapp_fees"][display] = max(result["dapp_fees"].get(display, 0), vol7d)
-    except Exception:
-        pass
-
-    return result
-
-
-def _sum_chart(chart: list | None, days: int) -> float | None:
-    if not chart:
-        return None
-    return sum(float(row[1]) for row in chart[-days:]) if chart else None
-
-
-# ── Dapp volumes ───────────────────────────────────────────────────────────────
-
-def fetch_dapp_volumes() -> dict[str, float]:
-    """Pull 7D DEX volume for Injective dapps from DefiLlama."""
-    results: dict[str, float] = {n: 0.0 for n in DAPP_NAMES}
-
-    # DEX volume
-    try:
-        data = _get(
-            "https://api.llama.fi/overview/dexs/injective"
-            "?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume"
-        )
-        for p in data.get("protocols", []):
-            slug  = (p.get("name") or p.get("slug") or "").lower()
-            vol7d = float(p.get("total7d") or p.get("totalVolume7d") or 0)
-            for key, display in DEFILLAMA_SLUG_MAP.items():
-                if key in slug:
-                    results[display] = max(results.get(display, 0), vol7d)
-    except Exception:
-        pass
-
-    # Options/derivatives volume (covers Choice, etc.)
-    try:
-        data = _get(
-            "https://api.llama.fi/overview/options/injective"
-            "?excludeTotalDataChart=true&dataType=dailyPremiumVolume"
-        )
-        for p in data.get("protocols", []):
-            slug  = (p.get("name") or p.get("slug") or "").lower()
-            vol7d = float(p.get("total7d") or 0)
-            for key, display in DEFILLAMA_SLUG_MAP.items():
-                if key in slug:
-                    results[display] = max(results.get(display, 0), vol7d)
-    except Exception:
-        pass
-
-    # Fill zeros with TVL from DefiLlama as a proxy (shows activity even if volume untracked)
-    try:
-        tvl_data = _get("https://api.llama.fi/v2/protocols")
-        for p in tvl_data:
+        protocols = _get("https://api.llama.fi/protocols")
+        for p in protocols:
             chains = [c.lower() for c in (p.get("chains") or [])]
             if "injective" not in chains:
                 continue
-            slug  = (p.get("name") or p.get("slug") or "").lower()
-            tvl   = float(p.get("tvl") or 0)
-            for key, display in DEFILLAMA_SLUG_MAP.items():
-                if key in slug and results.get(display, 0) == 0 and tvl > 0:
-                    # Store negative TVL as proxy marker — handled in formatting
-                    results[f"_{display}_tvl"] = tvl
+            name = (p.get("name") or "").lower()
+            for key, display in DEFILLAMA_NAME_MATCH.items():
+                if key in name:
+                    # chainTvls.Injective is the Injective-specific slice; fall back to total tvl
+                    inj_tvl = (p.get("chainTvls") or {}).get("Injective")
+                    tvl = float(inj_tvl if inj_tvl is not None else (p.get("tvl") or 0))
+                    stats[display]["tvl"] = max(stats[display]["tvl"], tvl)
     except Exception:
         pass
 
-    return results
+    # 2. DEX volume overview — only DEXs (Helix, DojoSwap) appear here
+    try:
+        data = _get(
+            "https://api.llama.fi/overview/dexs/injective"
+            "?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true"
+        )
+        for p in data.get("protocols", []):
+            name  = (p.get("name") or "").lower()
+            vol7d = float(p.get("total7d") or 0)
+            for key, display in DEFILLAMA_NAME_MATCH.items():
+                if key in name:
+                    stats[display]["volume_7d"] = max(stats[display]["volume_7d"], vol7d)
+    except Exception:
+        pass
+
+    # 3. Fees overview — covers more dapps (lending/yield earn fees)
+    try:
+        data = _get(
+            "https://api.llama.fi/overview/fees/injective"
+            "?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true"
+        )
+        for p in data.get("protocols", []):
+            name  = (p.get("name") or "").lower()
+            fee7d = float(p.get("total7d") or 0)
+            for key, display in DEFILLAMA_NAME_MATCH.items():
+                if key in name:
+                    stats[display]["fees_7d"] = max(stats[display]["fees_7d"], fee7d)
+    except Exception:
+        pass
+
+    return stats
 
 
-# ── NFT — Talis ───────────────────────────────────────────────────────────────
-
-def fetch_nft_volume_talis() -> float | None:
-    api_key = os.environ.get("TALIS_API_KEY", "")
-    headers = {"x-api-key": api_key} if api_key else {}
-
-    # Try public endpoints (no key required for most read endpoints)
-    endpoints = [
-        f"{TALIS_BASE}/v1/stats/volume?period=7d",
-        f"{TALIS_BASE}/v1/stats?period=7d",
-        f"{TALIS_BASE}/v1/marketplace/stats",
-        f"{TALIS_BASE}/v1/analytics/volume",
-        "https://talis.art/api/stats",
-    ]
-    for url in endpoints:
+def fetch_chain_fees(days: int = 7) -> float | None:
+    """Injective chain-level 7D fees from DefiLlama."""
+    for url in (
+        "https://api.llama.fi/summary/fees/injective?dataType=dailyFees",
+        "https://api.llama.fi/overview/fees/injective?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true",
+    ):
         try:
-            data = _get(url, headers=headers)
-            for k in ("volume", "totalVolume", "volume7d", "total", "usdVolume", "volumeUsd"):
+            data = _get(url)
+            total7d = data.get("total7d") or data.get("totalFees7d")
+            if total7d:
+                return float(total7d)
+            chart = data.get("totalDataChart")
+            if chart:
+                return sum(float(row[1]) for row in chart[-days:])
+        except Exception:
+            continue
+    return None
+
+
+# ── NFT volume — Rarible (primary) + Talis (fallback) ───────────────────────────
+
+def fetch_nft_volume(days: int = 7) -> float | None:
+    """
+    NFT 7D volume on Injective. Rarible has a documented multichain API
+    (blockchain=INJECTIVE); Talis is tried as a fallback.
+    """
+    # Rarible — sum 7D volume across Injective collections
+    rarible_key = os.environ.get("RARIBLE_API_KEY", "")
+    r_headers   = {"X-API-KEY": rarible_key} if rarible_key else {}
+    try:
+        data = _get(
+            "https://api.rarible.org/v0.1/data/collections/all",
+            params={"blockchain": "INJECTIVE", "size": 50},
+            headers=r_headers,
+        )
+        collections = data.get("collections") or data.get("data") or []
+        total = 0.0
+        for c in collections:
+            cid = c.get("id") or c.get("address")
+            if not cid:
+                continue
+            try:
+                s = _get(
+                    f"https://api.rarible.org/v0.1/data/collections/{cid}/statistics",
+                    params={"currency": "USD"},
+                    headers=r_headers,
+                )
+                vol = (s.get("volume") or {})
+                total += float(vol.get("value7d") or vol.get("value") or 0)
+            except Exception:
+                continue
+        if total > 0:
+            return total
+    except Exception:
+        pass
+
+    # Talis fallback (public read endpoints)
+    talis_key = os.environ.get("TALIS_API_KEY", "")
+    t_headers = {"x-api-key": talis_key} if talis_key else {}
+    for url in (
+        f"{TALIS_BASE}/v1/stats/volume?period=7d",
+        f"{TALIS_BASE}/v1/marketplace/stats",
+        "https://talis.art/api/stats",
+    ):
+        try:
+            data = _get(url, headers=t_headers)
+            for k in ("volume7d", "volume", "totalVolume", "usdVolume"):
                 if data.get(k) is not None:
                     return float(data[k])
         except Exception:
             continue
 
-    # Aggregate from collections endpoint
-    try:
-        data = _get(f"{TALIS_BASE}/v1/collections", headers=headers)
-        cols  = data if isinstance(data, list) else data.get("collections") or data.get("data") or []
-        total = sum(float(c.get("volume7d") or c.get("volumeWeek") or c.get("weekVolume") or 0) for c in cols)
-        return total if total > 0 else None
-    except Exception:
-        return None
+    return None
 
 
 # ── INJ price ─────────────────────────────────────────────────────────────────
@@ -279,15 +286,13 @@ def fetch_inj_price() -> float | None:
 # ── Collector ─────────────────────────────────────────────────────────────────
 
 def collect_all_metrics() -> dict:
-    fees = fetch_injective_fees()
     return {
         "timestamp":         datetime.now(timezone.utc).isoformat(),
         "tvl_usd":           fetch_tvl(),
         "weekly_txns":       fetch_weekly_txns(),
         "active_addresses":  fetch_active_addresses(),
-        "dapp_volumes":      fetch_dapp_volumes(),
-        "chain_fees_7d":     fees["chain_fees_7d"],
-        "dapp_fees":         fees["dapp_fees"],
-        "nft_volume_talis":  fetch_nft_volume_talis(),
+        "dapp_stats":        fetch_dapp_stats(),
+        "chain_fees_7d":     fetch_chain_fees(),
+        "nft_volume":        fetch_nft_volume(),
         "inj_price":         fetch_inj_price(),
     }
