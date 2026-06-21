@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-Entry point for the weekly Injective stats bot.
+Weekly Injective stats bot entry point.
 
 Usage:
-    python main.py              # full run: fetch → card → tweet → save
+    python main.py              # full run: fetch -> card -> tweet -> save
     python main.py --dry-run    # fetch + card but skip tweeting
-    python main.py --card-only  # only generate the image, no tweet
+    python main.py --card-only  # generate image only
 """
 
 import argparse
-import sys
 from datetime import datetime, timezone
 
 from src.history import last_snapshot, save_snapshot
@@ -19,36 +18,40 @@ from src.tweet import build_thread, post_thread
 
 
 def week_label() -> str:
-    now = datetime.now(timezone.utc)
-    return now.strftime("%b %d, %Y")
+    return datetime.now(timezone.utc).strftime("%b %d, %Y")
 
 
 def main(dry_run: bool = False, card_only: bool = False) -> None:
-    print("Fetching Injective metrics…")
+    print("Fetching Injective metrics...")
     metrics = collect_all_metrics()
 
-    prev = last_snapshot()
+    print(f"  INJ Price:        {metrics.get('inj_price')}")
+    print(f"  TVL:              {metrics.get('tvl_usd')}")
+    print(f"  7D Txns:          {metrics.get('weekly_txns')}")
+    print(f"  Active Addresses: {metrics.get('active_addresses')}")
+    print(f"  NFT Vol (Talis):  {metrics.get('nft_volume_talis')}")
+    print(f"  Dapp volumes:     {metrics.get('dapp_volumes')}")
+
+    prev  = last_snapshot()
     label = week_label()
 
-    print("Generating stats card…")
+    print("\nGenerating stats card...")
     card_path = generate_card(metrics, prev, label)
     print(f"Card saved: {card_path}")
 
     if card_only:
-        print("--card-only mode: skipping tweet and history save.")
         return
 
     thread = build_thread(metrics, prev, label)
 
     if dry_run:
-        print("\n--- DRY RUN: would post the following thread ---")
+        print("\n--- DRY RUN ---")
         for i, t in enumerate(thread, 1):
             print(f"\n[Tweet {i}]\n{t}")
         print(f"\n[Image] {card_path}")
-        print("--- end dry run ---")
         return
 
-    print("Posting to X…")
+    print("\nPosting to X...")
     post_thread(thread, image_path=card_path)
     print("Posted successfully.")
 

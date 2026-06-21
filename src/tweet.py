@@ -1,12 +1,10 @@
 """
-Post the weekly stats thread to X (Twitter) via Tweepy v4 (API v2).
+Post the weekly stats thread to X via Tweepy v4 (API v2).
 """
 
 from __future__ import annotations
-
 import os
 from pathlib import Path
-
 import tweepy
 
 
@@ -20,112 +18,86 @@ def _client() -> tweepy.Client:
 
 
 def _api_v1() -> tweepy.API:
-    """v1.1 auth needed for media upload."""
     auth = tweepy.OAuth1UserHandler(
-        os.environ["X_API_KEY"],
-        os.environ["X_API_SECRET"],
-        os.environ["X_ACCESS_TOKEN"],
-        os.environ["X_ACCESS_SECRET"],
+        os.environ["X_API_KEY"], os.environ["X_API_SECRET"],
+        os.environ["X_ACCESS_TOKEN"], os.environ["X_ACCESS_SECRET"],
     )
     return tweepy.API(auth)
 
 
-def _fmt_large(value: float | None, prefix: str = "$") -> str:
-    if value is None:
+def _fmt(v: float | None, prefix: str = "$") -> str:
+    if v is None:
         return "N/A"
-    if value >= 1_000_000_000:
-        return f"{prefix}{value / 1_000_000_000:.2f}B"
-    if value >= 1_000_000:
-        return f"{prefix}{value / 1_000_000:.2f}M"
-    if value >= 1_000:
-        return f"{prefix}{value / 1_000:.1f}K"
-    return f"{prefix}{value:,.0f}"
+    if v >= 1_000_000_000:
+        return f"{prefix}{v / 1e9:.2f}B"
+    if v >= 1_000_000:
+        return f"{prefix}{v / 1e6:.2f}M"
+    if v >= 1_000:
+        return f"{prefix}{v / 1e3:.1f}K"
+    return f"{prefix}{v:,.0f}"
 
 
-def _pct_arrow(pct: float | None) -> str:
-    if pct is None:
+def _arrow(cur: float | None, prv: float | None) -> str:
+    if cur is None or prv is None or prv == 0:
         return ""
-    arrow = "📈" if pct >= 0 else "📉"
-    sign = "+" if pct >= 0 else ""
-    return f" {arrow} {sign}{pct:.1f}%"
+    p = round((cur - prv) / abs(prv) * 100, 1)
+    return f" 📈 +{p:.1f}%" if p >= 0 else f" 📉 {p:.1f}%"
 
 
 def build_thread(metrics: dict, prev: dict | None, week_label: str) -> list[str]:
-    def pct(key: str) -> float | None:
-        from src.history import pct_change
-        return pct_change(metrics.get(key), (prev or {}).get(key))
+    p = prev or {}
 
-    def tx_count(m: dict | None) -> int | None:
-        if not m:
-            return None
-        vol = m.get("tx_volume")
-        if isinstance(vol, dict):
-            return vol.get("count") or vol.get("total")
-        return None
+    price      = metrics.get("inj_price")
+    prev_price = p.get("inj_price")
+    price_str  = f"${price:.2f}" if price else "N/A"
 
-    price = metrics.get("inj_price")
-    price_str = f"${price:.2f}" if price else "N/A"
-    price_pct = _pct_arrow(
-        None if not prev or not price or not prev.get("inj_price")
-        else round((price - prev["inj_price"]) / prev["inj_price"] * 100, 1)
-    )
+    tvl        = metrics.get("tvl_usd")
+    txns       = metrics.get("weekly_txns")
+    addrs      = metrics.get("active_addresses")
+    nft_vol    = metrics.get("nft_volume_talis")
 
-    tvl = _fmt_large(metrics.get("tvl_usd"))
-    tvl_pct = _pct_arrow(pct("tvl_usd"))
+    dapp_vols  = metrics.get("dapp_volumes") or {}
+    prev_vols  = p.get("dapp_volumes") or {}
 
-    addrs = _fmt_large(metrics.get("active_addresses"), prefix="")
-    addrs_pct = _pct_arrow(pct("active_addresses"))
-
-    txns = _fmt_large(tx_count(metrics), prefix="")
-    prev_tx = tx_count(prev) if prev else None
-    cur_tx = tx_count(metrics)
-    txns_pct = _pct_arrow(
-        None if cur_tx is None or prev_tx is None or prev_tx == 0
-        else round((cur_tx - prev_tx) / prev_tx * 100, 1)
-    )
-
-    contracts = _fmt_large(metrics.get("new_contracts"), prefix="")
-    contracts_pct = _pct_arrow(pct("new_contracts"))
-
-    top_dapps = metrics.get("top_dapps", [])
-
+    # Tweet 1 — headline
     tweet1 = (
         f"🔥 Injective Weekly Ecosystem Stats — {week_label}\n\n"
-        f"INJ Price: {price_str}{price_pct}\n"
-        f"TVL: {tvl}{tvl_pct}\n\n"
+        f"INJ Price: {price_str}{_arrow(price, prev_price)}\n"
+        f"TVL: {_fmt(tvl)}{_arrow(tvl, p.get('tvl_usd'))}\n"
+        f"NFT Vol (Talis 7D): {_fmt(nft_vol)}{_arrow(nft_vol, p.get('nft_volume_talis'))}\n\n"
         f"Full breakdown 👇 #Injective #INJ #DeFi"
     )
 
+    # Tweet 2 — on-chain activity
     tweet2 = (
         f"📊 On-chain activity (7 days)\n\n"
-        f"Active Addresses: {addrs}{addrs_pct}\n"
-        f"Total Transactions: {txns}{txns_pct}\n"
-        f"New Smart Contracts: {contracts}{contracts_pct}"
+        f"Active Addresses: {_fmt(addrs, '')}{_arrow(addrs, p.get('active_addresses'))}\n"
+        f"Total Transactions: {_fmt(txns, '')}{_arrow(txns, p.get('weekly_txns'))}"
     )
 
-    dapp_lines = []
-    for i, d in enumerate(top_dapps[:5], 1):
-        name = d.get("ticker") or d.get("market_id", "")[:12]
-        vol = _fmt_large(float(d.get("volume", 0) or 0))
-        dapp_lines.append(f"{i}. {name} — {vol} vol")
+    # Tweet 3 — dapp leaderboard
+    sorted_dapps = sorted(dapp_vols.items(), key=lambda x: x[1], reverse=True)
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣"]
+    lines = []
+    for i, (name, vol) in enumerate(sorted_dapps[:6]):
+        chg = _arrow(vol if vol else None, prev_vols.get(name))
+        lines.append(f"{medals[i]} {name}: {_fmt(vol)}{chg}")
 
-    tweet3 = "🏆 Top Markets by Volume\n\n" + "\n".join(dapp_lines) if dapp_lines else None
+    tweet3 = "🏆 Top Dapps — 7D Volume\n\n" + "\n".join(lines) if lines else None
 
     thread = [tweet1, tweet2]
     if tweet3:
         thread.append(tweet3)
-
     return thread
 
 
 def post_thread(thread: list[str], image_path: Path | None = None) -> None:
-    client = _client()
-    api = _api_v1()
+    client   = _client()
+    api      = _api_v1()
 
     media_id = None
-    if image_path and image_path.exists():
-        media = api.media_upload(str(image_path))
-        media_id = media.media_id_string
+    if image_path and Path(image_path).exists():
+        media_id = api.media_upload(str(image_path)).media_id_string
 
     reply_to = None
     for i, text in enumerate(thread):
@@ -134,6 +106,4 @@ def post_thread(thread: list[str], image_path: Path | None = None) -> None:
             kwargs["media_ids"] = [media_id]
         if reply_to:
             kwargs["in_reply_to_tweet_id"] = reply_to
-
-        resp = client.create_tweet(**kwargs)
-        reply_to = resp.data["id"]
+        reply_to = client.create_tweet(**kwargs).data["id"]
