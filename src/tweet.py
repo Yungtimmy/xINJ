@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import tweepy
 
+DAPP_ORDER = ["Helix", "Mito", "Hydro", "DojoSwap", "Black Panther", "Neptune", "Choice"]
+
 
 def _client() -> tweepy.Client:
     return tweepy.Client(
@@ -45,57 +47,60 @@ def _arrow(cur: float | None, prv: float | None) -> str:
 
 
 def build_thread(metrics: dict, prev: dict | None, week_label: str) -> list[str]:
-    p = prev or {}
-
+    p          = prev or {}
     price      = metrics.get("inj_price")
-    prev_price = p.get("inj_price")
-    price_str  = f"${price:.2f}" if price else "N/A"
-
     tvl        = metrics.get("tvl_usd")
     txns       = metrics.get("weekly_txns")
     addrs      = metrics.get("active_addresses")
+    fees       = metrics.get("chain_fees_7d")
     nft_vol    = metrics.get("nft_volume_talis")
-
     dapp_vols  = metrics.get("dapp_volumes") or {}
+    dapp_fees  = metrics.get("dapp_fees") or {}
     prev_vols  = p.get("dapp_volumes") or {}
 
-    # Tweet 1 — headline
+    # ── Tweet 1: Headline numbers ─────────────────────────────────────────────
     tweet1 = (
         f"🔥 Injective Weekly Ecosystem Stats — {week_label}\n\n"
-        f"INJ Price: {price_str}{_arrow(price, prev_price)}\n"
+        f"INJ Price: {'$' + f'{price:.2f}' if price else 'N/A'}"
+        f"{_arrow(price, p.get('inj_price'))}\n"
         f"TVL: {_fmt(tvl)}{_arrow(tvl, p.get('tvl_usd'))}\n"
-        f"NFT Vol (Talis 7D): {_fmt(nft_vol)}{_arrow(nft_vol, p.get('nft_volume_talis'))}\n\n"
+        f"Chain Fees (7D): {_fmt(fees)}{_arrow(fees, p.get('chain_fees_7d'))}\n"
+        f"NFT Vol (Talis): {_fmt(nft_vol)}{_arrow(nft_vol, p.get('nft_volume_talis'))}\n\n"
         f"Full breakdown 👇 #Injective #INJ #DeFi"
     )
 
-    # Tweet 2 — on-chain activity
+    # ── Tweet 2: On-chain activity ────────────────────────────────────────────
     tweet2 = (
-        f"📊 On-chain activity (7 days)\n\n"
-        f"Active Addresses: {_fmt(addrs, '')}{_arrow(addrs, p.get('active_addresses'))}\n"
-        f"Total Transactions: {_fmt(txns, '')}{_arrow(txns, p.get('weekly_txns'))}"
+        f"📊 On-chain Activity (7 days)\n\n"
+        f"🔁 Transactions: {_fmt(txns, '')}{_arrow(txns, p.get('weekly_txns'))}\n"
+        f"👛 Active Addresses: {_fmt(addrs, '')}{_arrow(addrs, p.get('active_addresses'))}"
     )
 
-    # Tweet 3 — dapp leaderboard
-    sorted_dapps = sorted(dapp_vols.items(), key=lambda x: x[1], reverse=True)
-    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣"]
-    lines = []
-    for i, (name, vol) in enumerate(sorted_dapps[:6]):
-        chg = _arrow(vol if vol else None, prev_vols.get(name))
-        lines.append(f"{medals[i]} {name}: {_fmt(vol)}{chg}")
+    # ── Tweet 3: Dapp leaderboard ─────────────────────────────────────────────
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣"]
+    lines  = []
+    display = {}
+    for name in DAPP_ORDER:
+        vol = dapp_vols.get(name, 0) or dapp_fees.get(name, 0)
+        display[name] = vol
 
-    tweet3 = "🏆 Top Dapps — 7D Volume\n\n" + "\n".join(lines) if lines else None
+    for i, (name, vol) in enumerate(sorted(display.items(), key=lambda x: x[1], reverse=True)):
+        if i >= 7:
+            break
+        chg   = _arrow(vol if vol else None, prev_vols.get(name))
+        label = _fmt(vol) if vol else "–"
+        lines.append(f"{medals[i]} {name}: {label}{chg}")
 
-    thread = [tweet1, tweet2]
-    if tweet3:
-        thread.append(tweet3)
-    return thread
+    tweet3 = "🏆 Top Dapps — 7D Volume\n\n" + "\n".join(lines)
+
+    return [tweet1, tweet2, tweet3]
 
 
 def post_thread(thread: list[str], image_path: Path | None = None) -> None:
     client   = _client()
     api      = _api_v1()
-
     media_id = None
+
     if image_path and Path(image_path).exists():
         media_id = api.media_upload(str(image_path)).media_id_string
 

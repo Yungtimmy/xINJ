@@ -1,0 +1,55 @@
+name: Mention Reply Bot
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # every 30 minutes
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (no replies posted)"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+
+jobs:
+  reply-mentions:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run mention bot
+        env:
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          HISTORY_FILE: data/history.json
+          LAST_SEEN_FILE: data/last_seen_id.txt
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "false" ]; then
+            python mention_reply.py
+          else
+            python mention_reply.py --dry-run
+          fi
+
+      - name: Commit last-seen ID
+        run: |
+          git config user.name  "xINJ Bot"
+          git config user.email "bot@xinj"
+          git add data/last_seen_id.txt || true
+          git diff --cached --quiet || git commit -m "chore: update mention last-seen ID [skip ci]"
+          git push origin HEAD

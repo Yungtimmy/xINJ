@@ -29,8 +29,10 @@ def main(dry_run: bool = False, card_only: bool = False) -> None:
     print(f"  TVL:              {metrics.get('tvl_usd')}")
     print(f"  7D Txns:          {metrics.get('weekly_txns')}")
     print(f"  Active Addresses: {metrics.get('active_addresses')}")
+    print(f"  Chain Fees (7D):  {metrics.get('chain_fees_7d')}")
     print(f"  NFT Vol (Talis):  {metrics.get('nft_volume_talis')}")
     print(f"  Dapp volumes:     {metrics.get('dapp_volumes')}")
+    print(f"  Dapp fees:        {metrics.get('dapp_fees')}")
 
     prev  = last_snapshot()
     label = week_label()

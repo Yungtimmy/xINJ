@@ -7,26 +7,33 @@ import os
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
-BG_TOP  = (10, 10, 30)
-BG_BOT  = (5, 20, 50)
+BG_TOP  = (8, 8, 24)
+BG_BOT  = (4, 16, 42)
 ACCENT  = (114, 88, 255)
 WHITE   = (255, 255, 255)
-MUTED   = (160, 160, 200)
-GREEN   = (80, 220, 130)
-RED     = (240, 80, 100)
-GOLD    = (255, 200, 80)
+MUTED   = (150, 150, 195)
+GREEN   = (72, 210, 120)
+RED     = (235, 75, 95)
+GOLD    = (255, 195, 60)
+DIM     = (90, 90, 130)
 
-WIDTH, HEIGHT, PADDING = 1200, 720, 56
+WIDTH, HEIGHT, PAD = 1200, 740, 52
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "data"))
 
+DAPP_ORDER = ["Helix", "Mito", "Hydro", "DojoSwap", "Black Panther", "Neptune", "Choice"]
 
-def _gradient_bg(draw: ImageDraw.ImageDraw) -> None:
+
+def _gradient(draw: ImageDraw.ImageDraw) -> None:
     for y in range(HEIGHT):
         t = y / HEIGHT
-        r = int(BG_TOP[0] + (BG_BOT[0] - BG_TOP[0]) * t)
-        g = int(BG_TOP[1] + (BG_BOT[1] - BG_TOP[1]) * t)
-        b = int(BG_TOP[2] + (BG_BOT[2] - BG_TOP[2]) * t)
-        draw.line([(0, y), (WIDTH, y)], fill=(r, g, b))
+        draw.line(
+            [(0, y), (WIDTH, y)],
+            fill=(
+                int(BG_TOP[0] + (BG_BOT[0] - BG_TOP[0]) * t),
+                int(BG_TOP[1] + (BG_BOT[1] - BG_TOP[1]) * t),
+                int(BG_TOP[2] + (BG_BOT[2] - BG_TOP[2]) * t),
+            ),
+        )
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -54,9 +61,9 @@ def _fmt(v: float | None, prefix: str = "$") -> str:
     return f"{prefix}{v:,.0f}"
 
 
-def _pct_label(cur: float | None, prv: float | None) -> tuple[str, tuple]:
+def _pct(cur: float | None, prv: float | None) -> tuple[str, tuple]:
     if cur is None or prv is None or prv == 0:
-        return "", MUTED
+        return "", DIM
     p = round((cur - prv) / abs(prv) * 100, 1)
     return (f"▲ {abs(p):.1f}%", GREEN) if p >= 0 else (f"▼ {abs(p):.1f}%", RED)
 
@@ -64,84 +71,93 @@ def _pct_label(cur: float | None, prv: float | None) -> tuple[str, tuple]:
 def generate_card(metrics: dict, prev: dict | None, week_label: str) -> Path:
     img  = Image.new("RGB", (WIDTH, HEIGHT))
     draw = ImageDraw.Draw(img)
-    _gradient_bg(draw)
+    _gradient(draw)
 
-    # Left accent bar
-    draw.rectangle([(0, 0), (7, HEIGHT)], fill=ACCENT)
+    draw.rectangle([(0, 0), (6, HEIGHT)], fill=ACCENT)
 
     # ── Header ──────────────────────────────────────────────────────────────
-    draw.text((PADDING, 36), "Injective Ecosystem", font=_font(50), fill=WHITE)
-    draw.text((PADDING, 100), f"Weekly Stats  ·  {week_label}", font=_font(24), fill=MUTED)
-    draw.rectangle([(PADDING, 138), (WIDTH - PADDING, 141)], fill=ACCENT)
+    draw.text((PAD, 30), "Injective Ecosystem", font=_font(48), fill=WHITE)
+    draw.text((PAD, 92), f"Weekly Stats  ·  {week_label}", font=_font(22), fill=MUTED)
+    draw.rectangle([(PAD, 128), (WIDTH - PAD, 130)], fill=ACCENT)
 
-    # ── INJ Price (top-right) ────────────────────────────────────────────────
-    price     = metrics.get("inj_price")
-    prev_price = (prev or {}).get("inj_price")
-    ps, pc    = _pct_label(price, prev_price)
-    px = WIDTH - PADDING - 210
-    draw.text((px, 152), "INJ Price", font=_font(22), fill=MUTED)
-    draw.text((px, 178), f"${price:.2f}" if price else "N/A", font=_font(42), fill=WHITE)
-    draw.text((px + 6, 228), ps, font=_font(22), fill=pc)
-
-    # ── Top stat row: TVL · Txns · Active Addrs · NFT Vol ───────────────────
     p = prev or {}
+
+    # ── INJ Price (top right) ────────────────────────────────────────────────
+    price      = metrics.get("inj_price")
+    ps, pc     = _pct(price, p.get("inj_price"))
+    rx = WIDTH - PAD - 200
+    draw.text((rx, 140), "INJ Price", font=_font(20), fill=MUTED)
+    draw.text((rx, 164), f"${price:.2f}" if price else "N/A", font=_font(40), fill=WHITE)
+    draw.text((rx + 4, 212), ps, font=_font(20), fill=pc)
+
+    # ── Top stats row ────────────────────────────────────────────────────────
     top_stats = [
-        ("Total Value Locked",  _fmt(metrics.get("tvl_usd")),         metrics.get("tvl_usd"),          p.get("tvl_usd")),
-        ("7D Transactions",     _fmt(metrics.get("weekly_txns"), ""),  metrics.get("weekly_txns"),      p.get("weekly_txns")),
-        ("Active Addresses",    _fmt(metrics.get("active_addresses"), ""), metrics.get("active_addresses"), p.get("active_addresses")),
-        ("NFT Vol (Talis)",     _fmt(metrics.get("nft_volume_talis")), metrics.get("nft_volume_talis"), p.get("nft_volume_talis")),
+        ("TVL",             _fmt(metrics.get("tvl_usd")),            metrics.get("tvl_usd"),          p.get("tvl_usd")),
+        ("7D Txns",         _fmt(metrics.get("weekly_txns"), ""),     metrics.get("weekly_txns"),      p.get("weekly_txns")),
+        ("Active Addrs",    _fmt(metrics.get("active_addresses"), ""),metrics.get("active_addresses"), p.get("active_addresses")),
+        ("Chain Fees (7D)", _fmt(metrics.get("chain_fees_7d")),       metrics.get("chain_fees_7d"),    p.get("chain_fees_7d")),
+        ("NFT Vol Talis",   _fmt(metrics.get("nft_volume_talis")),    metrics.get("nft_volume_talis"), p.get("nft_volume_talis")),
     ]
 
-    col_w = (WIDTH - 2 * PADDING) // 4
+    col_w = (WIDTH - 2 * PAD) // len(top_stats)
     for i, (label, val_str, cur, prv2) in enumerate(top_stats):
-        x = PADDING + i * col_w
-        y = 270
-        draw.text((x, y), label, font=_font(19), fill=MUTED)
-        draw.text((x, y + 28), val_str, font=_font(36), fill=WHITE)
-        pl, plc = _pct_label(cur, prv2)
-        draw.text((x + 4, y + 72), pl, font=_font(19), fill=plc)
+        x = PAD + i * col_w
+        draw.text((x, 248), label, font=_font(17), fill=MUTED)
+        draw.text((x, 270), val_str, font=_font(32), fill=WHITE)
+        pl, plc = _pct(cur, prv2)
+        draw.text((x + 2, 308), pl, font=_font(17), fill=plc)
 
     # Divider
-    draw.rectangle([(PADDING, 380), (WIDTH - PADDING, 382)], fill=(50, 50, 90))
+    draw.rectangle([(PAD, 342), (WIDTH - PAD, 344)], fill=(45, 45, 85))
 
     # ── Dapp leaderboard ─────────────────────────────────────────────────────
-    draw.text((PADDING, 394), "Top Dapps — 7D Volume", font=_font(22), fill=MUTED)
+    draw.text((PAD, 354), "Top Dapps — 7D Volume", font=_font(20), fill=MUTED)
 
-    dapp_vols: dict = metrics.get("dapp_volumes") or {}
-    prev_vols: dict = (prev or {}).get("dapp_volumes") or {}
-    sorted_dapps = sorted(dapp_vols.items(), key=lambda x: x[1], reverse=True)
+    dapp_vols  = metrics.get("dapp_volumes") or {}
+    prev_vols  = p.get("dapp_volumes") or {}
+    dapp_fees  = metrics.get("dapp_fees") or {}
 
-    bar_max   = sorted_dapps[0][1] if sorted_dapps and sorted_dapps[0][1] > 0 else 1
-    bar_area_w = WIDTH - 2 * PADDING - 340
-    row_h      = 46
-    y0         = 428
+    # Merge: use volume if available, else fees as proxy
+    display_vols = {}
+    for name in DAPP_ORDER:
+        vol = dapp_vols.get(name, 0)
+        if not vol:
+            vol = dapp_fees.get(name, 0)
+        display_vols[name] = vol
 
-    for i, (name, vol) in enumerate(sorted_dapps[:6]):
-        y = y0 + i * row_h
+    sorted_dapps = sorted(display_vols.items(), key=lambda x: x[1], reverse=True)
+    bar_max      = sorted_dapps[0][1] if sorted_dapps and sorted_dapps[0][1] > 0 else 1
+    bar_area_w   = WIDTH - 2 * PAD - 320
+    row_h        = 50
+    y0           = 384
+
+    medals = ["①", "②", "③", "④", "⑤", "⑥", "⑦"]
+    for i, (name, vol) in enumerate(sorted_dapps):
+        y        = y0 + i * row_h
         rank_col = GOLD if i == 0 else WHITE
-        draw.text((PADDING, y), f"{i+1}.", font=_font(20), fill=rank_col)
-        draw.text((PADDING + 32, y), name, font=_font(20), fill=WHITE)
+        draw.text((PAD, y + 6), medals[i], font=_font(18), fill=rank_col)
+        draw.text((PAD + 28, y + 6), name, font=_font(19), fill=WHITE)
 
-        # Volume bar
-        bar_x   = PADDING + 220
-        bar_len  = int((vol / bar_max) * bar_area_w) if bar_max > 0 else 0
-        draw.rectangle([(bar_x, y + 6), (bar_x + bar_len, y + 26)], fill=ACCENT)
+        bar_x   = PAD + 210
+        bar_len  = max(4, int((vol / bar_max) * bar_area_w)) if vol > 0 else 0
+        if bar_len:
+            bar_col = ACCENT if i == 0 else (70, 55, 160)
+            draw.rectangle([(bar_x, y + 10), (bar_x + bar_len, y + 30)], fill=bar_col)
 
-        # Volume label
-        vol_str = _fmt(vol)
-        draw.text((bar_x + bar_len + 10, y + 4), vol_str, font=_font(20), fill=WHITE)
+        vol_label = _fmt(vol) if vol else "–"
+        draw.text((bar_x + bar_len + 10, y + 6), vol_label, font=_font(19), fill=WHITE)
 
-        # WoW change
-        prev_vol = prev_vols.get(name)
-        pl, plc  = _pct_label(vol if vol else None, prev_vol if prev_vol else None)
-        draw.text((WIDTH - PADDING - 100, y + 4), pl, font=_font(18), fill=plc)
+        prev_v   = prev_vols.get(name)
+        pl, plc  = _pct(vol if vol else None, prev_v if prev_v else None)
+        if pl:
+            draw.text((WIDTH - PAD - 90, y + 6), pl, font=_font(17), fill=plc)
 
     # ── Footer ───────────────────────────────────────────────────────────────
-    draw.rectangle([(0, HEIGHT - 44), (WIDTH, HEIGHT)], fill=(18, 18, 42))
+    draw.rectangle([(0, HEIGHT - 42), (WIDTH, HEIGHT)], fill=(16, 16, 40))
     draw.text(
-        (PADDING, HEIGHT - 30),
+        (PAD, HEIGHT - 28),
         "Data: Injective Explorer · DefiLlama · CoinGecko · Talis  |  @xINJ_bot",
-        font=_font(18),
+        font=_font(17),
         fill=MUTED,
     )
 
