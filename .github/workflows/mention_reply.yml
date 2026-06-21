@@ -42,6 +42,7 @@ jobs:
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           HISTORY_FILE: data/history.json
           LAST_SEEN_FILE: data/last_seen_id.txt
         # Scheduled runs post live; only an explicit `dry_run=true` dispatch is a dry run.
