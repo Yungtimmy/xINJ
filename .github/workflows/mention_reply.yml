@@ -2,15 +2,20 @@ name: Mention Reply Bot
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # every 30 minutes
+    - cron: "0 */3 * * *"   # every 3 hours (stays within free X API read limits)
   workflow_dispatch:
     inputs:
       dry_run:
         description: "Dry run (no replies posted)"
         required: false
-        default: "true"
+        default: "false"
         type: choice
         options: ["true", "false"]
+
+# Prevent overlapping runs from racing on the last-seen commit
+concurrency:
+  group: mention-reply
+  cancel-in-progress: false
 
 jobs:
   reply-mentions:
@@ -39,17 +44,29 @@ jobs:
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           HISTORY_FILE: data/history.json
           LAST_SEEN_FILE: data/last_seen_id.txt
+        # Scheduled runs post live; only an explicit `dry_run=true` dispatch is a dry run.
         run: |
-          if [ "${{ github.event.inputs.dry_run }}" = "false" ]; then
-            python mention_reply.py
-          else
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             python mention_reply.py --dry-run
+          else
+            python mention_reply.py
           fi
 
       - name: Commit last-seen ID
+        if: always()
         run: |
           git config user.name  "xINJ Bot"
           git config user.email "bot@xinj"
           git add data/last_seen_id.txt || true
-          git diff --cached --quiet || git commit -m "chore: update mention last-seen ID [skip ci]"
-          git push origin HEAD
+          if git diff --cached --quiet; then
+            echo "No change to last-seen ID."
+            exit 0
+          fi
+          git commit -m "chore: update mention last-seen ID [skip ci]"
+          # Race-safe push: rebase onto latest remote, retry with backoff
+          for i in 1 2 3 4; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && \
+            git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            echo "push attempt $i failed, retrying..."; sleep $((2 ** i))
+          done
+          echo "::error::Failed to push last-seen ID after retries"; exit 1

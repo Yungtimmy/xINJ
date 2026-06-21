@@ -4,11 +4,14 @@ Run via GitHub Actions every 30 minutes.
 """
 
 from __future__ import annotations
-import json, os, re
+import json, os, re, sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import tweepy
+
+# A leading "RT @user:" marks a retweet — we never reply to those.
+RETWEET_RE = re.compile(r"^RT @\w+:", re.IGNORECASE)
 
 LAST_SEEN_FILE = Path(os.environ.get("LAST_SEEN_FILE", "data/last_seen_id.txt"))
 
@@ -124,7 +127,7 @@ def run_mention_bot(dry_run: bool = False) -> None:
         response = client.get_users_mentions(**kwargs)
     except tweepy.TweepyException as e:
         print(f"Error fetching mentions: {e}")
-        return
+        sys.exit(1)
 
     if not response.data:
         print("No new mentions.")
@@ -133,15 +136,28 @@ def run_mention_bot(dry_run: bool = False) -> None:
     # Build a user lookup from expansions
     users = {str(u.id): u for u in (response.includes or {}).get("users", [])}
 
-    newest_id = str(response.data[0].id)
-    replied   = 0
+    newest_id   = str(response.data[0].id)
+    replied     = 0
+    failures    = 0
+    seen_convos: set[str] = set()  # at most one reply per conversation per run
 
     for tweet in reversed(response.data):  # oldest first
-        author    = users.get(str(tweet.author_id))
+        author      = users.get(str(tweet.author_id))
         author_name = author.username if author else "there"
 
         # Don't reply to ourselves
         if str(tweet.author_id) == bot_user_id:
+            continue
+
+        # Skip retweets — they carry "RT @user:" and aren't a direct mention to us
+        if RETWEET_RE.match(tweet.text or ""):
+            print(f"Skipping (retweet): {tweet.text[:60]}")
+            continue
+
+        # Only one reply per conversation thread per run, to avoid spamming
+        convo = str(getattr(tweet, "conversation_id", "") or tweet.id)
+        if convo in seen_convos:
+            print(f"Skipping (already replied in this thread this run): {tweet.text[:60]}")
             continue
 
         reply_text = _build_reply(tweet.text, author_name, metrics)
@@ -153,6 +169,7 @@ def run_mention_bot(dry_run: bool = False) -> None:
 
         if dry_run:
             print(f"\n[DRY RUN] Would reply to @{author_name}:\n{full_reply}\n")
+            seen_convos.add(convo)
         else:
             try:
                 client.create_tweet(
@@ -161,10 +178,21 @@ def run_mention_bot(dry_run: bool = False) -> None:
                 )
                 print(f"Replied to @{author_name}: {full_reply[:80]}...")
                 replied += 1
+                seen_convos.add(convo)
+                # Persist progress immediately so a mid-run crash never re-replies
+                _save_last_seen(str(tweet.id))
             except tweepy.TweepyException as e:
                 print(f"Failed to reply to @{author_name}: {e}")
+                failures += 1
 
-    if not dry_run:
+    # On a clean run, fast-forward past every processed mention (including ones
+    # we intentionally skipped). If anything failed, leave last_seen at the last
+    # successfully-replied id (set progressively above) so failures get retried.
+    if not dry_run and not failures:
         _save_last_seen(newest_id)
 
-    print(f"\nDone. {replied} replies sent. Latest mention ID: {newest_id}")
+    print(f"\nDone. {replied} replies sent, {failures} failures. Latest mention ID: {newest_id}")
+
+    # Surface failures so the GitHub Actions run shows red and alerts us
+    if failures:
+        sys.exit(1)

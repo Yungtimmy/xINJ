@@ -51,9 +51,20 @@ jobs:
           fi
 
       - name: Commit updated history
+        if: always()
         run: |
           git config user.name  "xINJ Bot"
           git config user.email "bot@xINJ"
           git add data/history.json || true
-          git diff --cached --quiet || git commit -m "chore: update weekly stats history [skip ci]"
-          git push origin HEAD
+          if git diff --cached --quiet; then
+            echo "No history change to commit."
+            exit 0
+          fi
+          git commit -m "chore: update weekly stats history [skip ci]"
+          # Race-safe push: rebase onto latest remote, retry with backoff
+          for i in 1 2 3 4; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && \
+            git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            echo "push attempt $i failed, retrying..."; sleep $((2 ** i))
+          done
+          echo "::error::Failed to push history after retries"; exit 1
