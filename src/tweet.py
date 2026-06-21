@@ -114,7 +114,15 @@ def post_thread(thread: list[str], image_path: Path | None = None) -> None:
     media_id = None
 
     if image_path and Path(image_path).exists():
-        media_id = api.media_upload(str(image_path)).media_id_string
+        try:
+            media_id = api.media_upload(str(image_path)).media_id_string
+            print(f"Media uploaded: {media_id}")
+        except tweepy.Forbidden:
+            # v1.1 media upload requires Elevated access or higher.
+            # Post the text thread without the image rather than crashing.
+            print("Warning: media upload forbidden (v1.1 access not available). Posting text-only thread.")
+        except tweepy.TweepyException as e:
+            print(f"Warning: media upload failed ({e}). Posting text-only thread.")
 
     reply_to = None
     for i, text in enumerate(thread):

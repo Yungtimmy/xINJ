@@ -10,6 +10,8 @@ from pathlib import Path
 
 import tweepy
 
+from src.groq_reply import groq_reply
+
 # A leading "RT @user:" marks a retweet — we never reply to those.
 RETWEET_RE = re.compile(r"^RT @\w+:", re.IGNORECASE)
 
@@ -55,10 +57,19 @@ def _get_bot_user_id(client: tweepy.Client) -> str:
 
 def _build_reply(tweet_text: str, author_name: str, metrics: dict | None) -> str | None:
     """Return a reply string or None if we should skip this mention."""
+    # Regex gate: only engage with Injective-related mentions.
     if not INJ_KEYWORDS.search(tweet_text):
         return None
 
-    # If they're asking about stats/price, give a quick snapshot
+    # Try an AI-generated, context-aware reply first (real numbers passed in,
+    # so it can't hallucinate figures). Falls back to templates if Groq is
+    # unavailable or errors out.
+    ai = groq_reply(tweet_text, metrics)
+    if ai:
+        return ai
+
+    # ── Fallback templates ────────────────────────────────────────────────────
+    # If they're asking about stats/price, give a quick factual snapshot
     if QUICK_STATS_KEYWORDS.search(tweet_text) and metrics:
         price   = metrics.get("inj_price")
         tvl     = metrics.get("tvl_usd")
