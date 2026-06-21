@@ -92,11 +92,10 @@ def generate_card(metrics: dict, prev: dict | None, week_label: str) -> Path:
 
     # ── Top stats row ────────────────────────────────────────────────────────
     top_stats = [
-        ("TVL",             _fmt(metrics.get("tvl_usd")),            metrics.get("tvl_usd"),          p.get("tvl_usd")),
-        ("7D Txns",         _fmt(metrics.get("weekly_txns"), ""),     metrics.get("weekly_txns"),      p.get("weekly_txns")),
-        ("Active Addrs",    _fmt(metrics.get("active_addresses"), ""),metrics.get("active_addresses"), p.get("active_addresses")),
-        ("Chain Fees (7D)", _fmt(metrics.get("chain_fees_7d")),       metrics.get("chain_fees_7d"),    p.get("chain_fees_7d")),
-        ("NFT Vol (7D)",    _fmt(metrics.get("nft_volume")),          metrics.get("nft_volume"),       p.get("nft_volume")),
+        ("TVL",          _fmt(metrics.get("tvl_usd")),          metrics.get("tvl_usd"),         p.get("tvl_usd")),
+        ("DEX Vol 7D",   _fmt(metrics.get("dex_volume_7d")),    metrics.get("dex_volume_7d"),   p.get("dex_volume_7d")),
+        ("Chain Fees 7D",_fmt(metrics.get("chain_fees_7d")),    metrics.get("chain_fees_7d"),   p.get("chain_fees_7d")),
+        ("Revenue 7D",   _fmt(metrics.get("chain_revenue_7d")), metrics.get("chain_revenue_7d"),p.get("chain_revenue_7d")),
     ]
 
     col_w = (WIDTH - 2 * PAD) // len(top_stats)

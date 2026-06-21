@@ -27,9 +27,11 @@ def main(dry_run: bool = False, card_only: bool = False) -> None:
 
     print(f"  INJ Price:        {metrics.get('inj_price')}")
     print(f"  TVL:              {metrics.get('tvl_usd')}")
+    print(f"  DEX Vol (7D):     {metrics.get('dex_volume_7d')}")
+    print(f"  Chain Fees (7D):  {metrics.get('chain_fees_7d')}")
+    print(f"  Revenue (7D):     {metrics.get('chain_revenue_7d')}")
     print(f"  7D Txns:          {metrics.get('weekly_txns')}")
     print(f"  Active Addresses: {metrics.get('active_addresses')}")
-    print(f"  Chain Fees (7D):  {metrics.get('chain_fees_7d')}")
     print(f"  NFT Vol (7D):     {metrics.get('nft_volume')}")
     print(f"  Dapp stats:")
     for name, s in (metrics.get('dapp_stats') or {}).items():

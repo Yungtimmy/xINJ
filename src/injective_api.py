@@ -214,6 +214,37 @@ def fetch_chain_fees(days: int = 7) -> float | None:
     return None
 
 
+def fetch_chain_revenue(days: int = 7) -> float | None:
+    """
+    Injective 7D revenue from DefiLlama. Revenue = transaction fees + auction
+    fees (INJ burned in weekly burn auctions) per DefiLlama's methodology.
+    """
+    try:
+        data = _get("https://api.llama.fi/summary/fees/injective?dataType=dailyRevenue")
+        total7d = data.get("total7d")
+        if total7d:
+            return float(total7d)
+        chart = data.get("totalDataChart")
+        if chart:
+            return sum(float(row[1]) for row in chart[-days:])
+    except Exception:
+        pass
+    return None
+
+
+def fetch_chain_dex_volume(days: int = 7) -> float | None:
+    """Chain-wide 7D DEX volume on Injective from DefiLlama."""
+    try:
+        data = _get(
+            "https://api.llama.fi/overview/dexs/injective"
+            "?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true"
+        )
+        total7d = data.get("total7d")
+        return float(total7d) if total7d else None
+    except Exception:
+        return None
+
+
 # ── NFT volume — Rarible (primary) + Talis (fallback) ───────────────────────────
 
 def fetch_nft_volume(days: int = 7) -> float | None:
@@ -289,10 +320,12 @@ def collect_all_metrics() -> dict:
     return {
         "timestamp":         datetime.now(timezone.utc).isoformat(),
         "tvl_usd":           fetch_tvl(),
+        "dex_volume_7d":     fetch_chain_dex_volume(),
+        "chain_fees_7d":     fetch_chain_fees(),
+        "chain_revenue_7d":  fetch_chain_revenue(),
         "weekly_txns":       fetch_weekly_txns(),
         "active_addresses":  fetch_active_addresses(),
         "dapp_stats":        fetch_dapp_stats(),
-        "chain_fees_7d":     fetch_chain_fees(),
         "nft_volume":        fetch_nft_volume(),
         "inj_price":         fetch_inj_price(),
     }
